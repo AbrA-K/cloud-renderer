@@ -30,7 +30,6 @@ fn fragment(
     var out: FragmentOutput;
     out.color = vec4<f32>(color, 0);
 
-  // march
     let cam_pos = view.world_position;
     var viewport_uv = coords_to_viewport_uv(mesh.position.xy, view.viewport) * 2.0 - 1.0;
     viewport_uv.y *= -1;
@@ -40,31 +39,16 @@ fn fragment(
     let ray_dir = normalize(world.xyz - cam_pos);
     var curr_pos = cam_pos;
     var dist_marched = 0.0;
-  // march
-    while dist_marched < FAR_CLIP {
-        let dist = sdf_world(curr_pos);
-      // hit enter point
-        if dist < TERMINATION_DIST {
-            let enter_point = curr_pos;
-	  // march for exit point
-            curr_pos += ray_dir * 1.0 * 2.0; // start from the other side
-            let ray_dir_back = -ray_dir;
-            dist_marched = 0.0;
-            while dist_marched < FAR_CLIP {
-                let dist = sdf_world(curr_pos);
-                if dist < TERMINATION_DIST {
-                    let exit_point = curr_pos;
-                    let color = color_cloud(enter_point, exit_point);
-                    out.color = vec4<f32>(color);
-                    return out;
-                }
-                dist_marched += dist;
-                curr_pos += ray_dir_back * dist;
-            }
-        }
-        curr_pos += ray_dir * dist;
-        dist_marched += dist;
-    }
+    let enter_pos_march = perform_march(cam_pos, ray_dir);
+    if !enter_pos_march.has_hit {
+	return out;
+      }
+    let behind_cloud_pos = enter_pos_march.hit + ray_dir * 1.0 * 2.0;
+    let exit_pos_march = perform_march(behind_cloud_pos, -ray_dir);
+    if !exit_pos_march.has_hit {
+	return out;
+      }
+    out.color = color_cloud(enter_pos_march.hit, exit_pos_march.hit);
     return out;
 }
 
@@ -79,12 +63,31 @@ fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
     var curr_point = enter_point;
     var absorption_sum = 0.0;
     for (var i = 0; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
-        absorption_sum += my_noise(curr_point * 3 + globals.time);
+        absorption_sum += my_noise(curr_point);
         curr_point += (dir * step_len);
     }
     let absorption = absorption_sum / f32(ABSORPTION_SAMPLE_AMOUNT);
     let alpha = 1 - beers_law(distance(enter_point, exit_point), absorption);
     return vec4<f32>(CLOUD_COLOR, alpha);
+}
+
+struct MarchOutput {
+ has_hit: bool,
+ hit: vec3<f32>,
+}
+fn perform_march(start_pos: vec3<f32>, dir: vec3<f32>) -> MarchOutput {
+  let ndir = normalize(dir);
+  var marched_dist = 0.0;
+  var curr_point = start_pos;
+  while marched_dist < FAR_CLIP {
+      let dist = sdf_world(curr_point);
+      if dist < TERMINATION_DIST {
+	  return MarchOutput(true, curr_point);
+	}
+      marched_dist += dist;
+      curr_point += ndir * dist;
+    }
+  return MarchOutput(false, curr_point);
 }
 
 fn sdf_world(ray_position: vec3<f32>) -> f32 {
@@ -151,8 +154,7 @@ fn voroNoise2(x: vec2f, u: f32, v: f32) -> f32 {
 
 fn my_noise(p: vec3<f32>) -> f32 {
     var out: f32;
-    // out = noise3(p);
-    out = worley_noise(p);
+    out = (worley_noise(p) - 0.2) * 2.0;
     out = clamp(out * 1.5, 0.0, 1.0);
     return out;
 }
