@@ -6,6 +6,7 @@ use bevy::{
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, MaterialPlugin::<CloudMaterial>::default()))
+        .insert_resource(ClearColor(Color::srgb(0.5, 0.5, 0.9)))
         .add_systems(Startup, spawn_stuff)
         .add_systems(Update, spin_camera)
         .run();
@@ -60,11 +61,11 @@ fn spawn_stuff(
     ));
 
     // circular base
-    commands.spawn((
-        Mesh3d(meshes.add(Circle::new(6.0))),
-        MeshMaterial3d(materials.add(Color::WHITE)),
-        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
+    // commands.spawn((
+    //     Mesh3d(meshes.add(Circle::new(6.0))),
+    //     MeshMaterial3d(materials.add(Color::WHITE)),
+    //     Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+    // ));
 
     // cloud
     commands.spawn((

@@ -12,12 +12,21 @@
       mesh_view_bindings::globals,
 }
 
+const EPSILON: f32 = 2.718281828;
+const PI: f32 = 3.141592654;
 const FAR_CLIP: f32 = 10.0;
 const TERMINATION_DIST: f32 = 0.001;
 const U32_HIGHEST: u32 = 4294967295u;
 const NOISE_RES: u32 = 10;
-const CLOUD_COLOR: vec3<f32> = vec3<f32>(1.0, 0.1, 1.0);
-const ABSORPTION: f32 = 1.5;
+const CLOUD_COLOR: vec3<f32> = vec3<f32>(0.0);
+const ABSORPTION: f32 = 1;
+
+const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(1.5), 5000.0);
+struct LightInfo {
+ light_type: u32,
+ custom_var: vec3<f32>,
+ illuminance: f32,
+}
 
 @group(2) @binding(100) var<uniform> color: vec3<f32>;
 
@@ -28,7 +37,7 @@ fn fragment(
 ) -> FragmentOutput {
 
     var out: FragmentOutput;
-    out.color = vec4<f32>(color, 0);
+    out.color = vec4<f32>(0); // pretend that we don't hit
 
     let cam_pos = view.world_position;
     var viewport_uv = coords_to_viewport_uv(mesh.position.xy, view.viewport) * 2.0 - 1.0;
@@ -43,7 +52,8 @@ fn fragment(
     if !enter_pos_march.has_hit {
 	return out;
       }
-    let behind_cloud_pos = enter_pos_march.hit + ray_dir * 1.0 * 2.0;
+    // TODO: this should be twice the radius, not magic numbers
+    let behind_cloud_pos = enter_pos_march.hit + ray_dir * 1.0 * 3.0;
     let exit_pos_march = perform_march(behind_cloud_pos, -ray_dir);
     if !exit_pos_march.has_hit {
 	return out;
@@ -53,7 +63,12 @@ fn fragment(
 }
 
 fn beers_law(distance: f32, absorption: f32) -> f32 {
-    return exp(-distance * absorption);
+  return exp(-distance * absorption);
+}
+
+fn powders_beers_law(distance: f32, absorption: f32) -> f32 {
+  let beer = beers_law(distance, absorption);
+  return beer * pow(EPSILON, -distance * absorption);
 }
 
 const ABSORPTION_SAMPLE_AMOUNT = 10;
@@ -63,14 +78,18 @@ fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
     var curr_point = enter_point;
     var absorption_sum = 0.0;
     for (var i = 0; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
-        absorption_sum += my_noise(curr_point);
-        curr_point += (dir * step_len);
+      absorption_sum += clamp(my_noise(curr_point), 0.0, 1.0);
+      curr_point += (dir * step_len);
     }
     let absorption = absorption_sum / f32(ABSORPTION_SAMPLE_AMOUNT);
-    let alpha = 1 - beers_law(distance(enter_point, exit_point), absorption);
-    return vec4<f32>(CLOUD_COLOR, alpha);
+    var alpha = 1 - powders_beers_law(distance(enter_point, exit_point), absorption * ABSORPTION);
+    // overdrive alpha so edges aren't of the sdf shape
+    alpha -= 0.1;
+    alpha *= 1.2;
+    return vec4<f32>(1.0, 1.0, 1.0, alpha);
 }
 
+// Optional type please respond to my texts :(
 struct MarchOutput {
  has_hit: bool,
  hit: vec3<f32>,
@@ -93,18 +112,18 @@ fn perform_march(start_pos: vec3<f32>, dir: vec3<f32>) -> MarchOutput {
 fn sdf_world(ray_position: vec3<f32>) -> f32 {
   // our cloud is at point (0.0, 1.5, 0.0)
   // TODO: pass it from material, don't hardcode
-    let rp = translate_ray(ray_position, vec3<f32>(0.0, 1.5, 0.0));
+  let rp = translate_ray(ray_position, vec3<f32>(0.0, 1.5, 0.0));
 
-    return sdf_cloud(rp, 1.0);
+  return sdf_cloud(rp, 1.0);
 }
 
 fn translate_ray(r: vec3<f32>, world_position: vec3<f32>) -> vec3<f32> {
     var out = r;
-  // translation
+    // translation
     out -= world_position;
 
-  // TODO: rotation
-  // TODO: scale
+    // TODO: rotation
+    // TODO: scale
     return out;
 }
 
@@ -115,47 +134,28 @@ fn translate_ray(r: vec3<f32>, world_position: vec3<f32>) -> vec3<f32> {
 // `-----' `-------' `--'        `--'     `----' `--''--' `---'  `--'  `--' `---' `--''--'`----'
 fn sdf_cloud(p: vec3<f32>, rad: f32) -> f32 {
     let circle = length(p) - rad;
-    let circle_normal = p * 2.0;
+    let cube = sdBox(p, vec3<f32>(0.8));
+
 
     return circle;
 }
 
-// https://gist.github.com/munrocket/236ed5ba7e409b8bdf1ff6eca5dcdc39
-//  <https://www.shadertoy.com/view/Xd23Dh>
-//  by Inigo Quilez
-//
-fn hash23(p: vec2f) -> vec3f {
-    let q = vec3f(dot(p, vec2f(127.1, 311.7)),
-        dot(p, vec2f(269.5, 183.3)),
-        dot(p, vec2f(419.2, 371.9)));
-    return fract(sin(q) * 43758.5453);
-}
-fn voroNoise2(x: vec2f, u: f32, v: f32) -> f32 {
-    let p = floor(x);
-    let f = fract(x);
-    let k = 1. + 63. * pow(1. - v, 4.);
-    var va: f32 = 0.;
-    var wt: f32 = 0.;
-    for (var j: i32 = -2; j <= 2; j = j + 1) {
-        for (var i: i32 = -2; i <= 2; i = i + 1) {
-            let g = vec2f(f32(i), f32(j));
-            let o = hash23(p + g) * vec3f(u, u, 1.);
-            let r = g - f + o.xy;
-            let d = dot(r, r);
-            let ww = pow(1. - smoothstep(0., 1.414, sqrt(d)), k);
-            va = va + o.z * ww;
-            wt = wt + ww;
-        }
-    }
-    return va / wt;
+fn sdBox(p: vec3f, b: vec3f) -> f32 {
+  let q = abs(p) - b;
+  return length(max(q, vec3f(0.))) + min(max(q.x, max(q.y, q.z)), 0.);
 }
 
 // ------- noise -------
 
+// sample this for the cloud - the rest are helpers
 fn my_noise(p: vec3<f32>) -> f32 {
     var out: f32;
-    out = (worley_noise(p) - 0.2) * 2.0;
-    out = clamp(out * 1.5, 0.0, 1.0);
+    let pt = p * 2 + globals.time / 3;
+    // let pt = p;
+    out += worley_noise(pt) * 2;
+    out -= noise3(pt * 5) * 0.5;
+    // swivel = clamp(swivel, 0, 1);
+    // out = 0.5;
     return out;
 }
 
@@ -227,7 +227,6 @@ fn noise3(p: vec3f) -> f32 {
     return o4.y * d.y + o4.x * (1. - d.y);
 }
 
-
 fn hashed_pos_f32(p: vec3u) -> vec3<f32> {
     let hashed_pos = pcg3d(p);
     let hashed_pos_f32 = vec3<f32>(
@@ -245,4 +244,9 @@ fn pcg3d(p: vec3u) -> vec3u {
     v ^= v >> vec3u(16u);
     v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
     return v;
+}
+
+fn henry_greenstein(g: f32, costh: f32) -> f32 {
+  return (1.0 / (4.0 * PI)) *
+    ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
 }
