@@ -12,6 +12,9 @@
       mesh_view_bindings::globals,
 }
 
+// THIS NEEDS TO BE SYNCED WITH THE ONE IN main.rs
+const WORLEY_WORLD_SIZE: u32 = 10;
+
 const EPSILON: f32 = 2.718281828;
 const PI: f32 = 3.141592654;
 const FAR_CLIP: f32 = 10.0;
@@ -19,7 +22,7 @@ const TERMINATION_DIST: f32 = 0.001;
 const U32_HIGHEST: u32 = 4294967295u;
 const NOISE_RES: u32 = 10;
 const CLOUD_COLOR: vec3<f32> = vec3<f32>(0.0);
-const ABSORPTION: f32 = 1;
+const ABSORPTION: f32 = 2;
 
 const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(1.5), 5000.0);
 struct LightInfo {
@@ -29,6 +32,7 @@ struct LightInfo {
 }
 
 @group(2) @binding(100) var<uniform> color: vec3<f32>;
+@group(2) @binding(0) var<storage, read> worley_offsets: array<array<array<f32, WORLEY_WORLD_SIZE>, WORLEY_WORLD_SIZE>, WORLEY_WORLD_SIZE>;
 
 @fragment
 fn fragment(
@@ -53,7 +57,7 @@ fn fragment(
 	return out;
       }
     // TODO: this should be twice the radius, not magic numbers
-    let behind_cloud_pos = enter_pos_march.hit + ray_dir * 1.0 * 3.0;
+    let behind_cloud_pos = enter_pos_march.hit + ray_dir * 1.0 * 2.0;
     let exit_pos_march = perform_march(behind_cloud_pos, -ray_dir);
     if !exit_pos_march.has_hit {
 	return out;
@@ -68,25 +72,45 @@ fn beers_law(distance: f32, absorption: f32) -> f32 {
 
 fn powders_beers_law(distance: f32, absorption: f32) -> f32 {
   let beer = beers_law(distance, absorption);
-  return beer * pow(EPSILON, -distance * absorption);
+  return beer * pow(EPSILON, -distance * absorption * ABSORPTION);
 }
 
-const ABSORPTION_SAMPLE_AMOUNT = 10;
+const LIGHT_SAMPLE_AMOUNT = 3u;
+const ABSORPTION_SAMPLE_AMOUNT = 20u;
 fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
-    let dir = normalize(exit_point - enter_point);
+    let step_dir = normalize(exit_point - enter_point);
     let step_len = distance(enter_point, exit_point) / f32(ABSORPTION_SAMPLE_AMOUNT);
     var curr_point = enter_point;
     var absorption_sum = 0.0;
-    for (var i = 0; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
-      absorption_sum += clamp(my_noise(curr_point), 0.0, 1.0);
-      curr_point += (dir * step_len);
+    var light_sum = 0.0;
+    for (var i = 0u; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
+      let light_march = perform_march(TEST_LIGHT.custom_var, curr_point - TEST_LIGHT.custom_var);
+      if light_march.has_hit {
+	  let cosh = dot(step_dir, curr_point - light_march.hit) / (length(step_dir) * length(curr_point - light_march.hit));
+	  let scater = henry_greenstein(-0.3, cosh) + henry_greenstein(0.3, cosh);
+	  let light_samples = sum_sample_noise_over_range(curr_point, light_march.hit, LIGHT_SAMPLE_AMOUNT);
+	  let light_avg = light_samples ;
+	  let light_sum_save = light_sum;
+	  light_sum += scater;
+	  light_sum += powders_beers_law(distance(light_march.hit, curr_point),
+					 light_avg * ABSORPTION);
+	  let absorption = absorption_sum;
+	  var alpha = 1 - powders_beers_law(step_len * f32(i),
+					    absorption * ABSORPTION);
+	  light_sum = mix(light_sum, (light_sum_save / f32(i+1)) * (f32(i) + 2), alpha);
+	}
+      absorption_sum += my_noise(curr_point) * step_len;
+      curr_point += (step_dir * step_len);
     }
-    let absorption = absorption_sum / f32(ABSORPTION_SAMPLE_AMOUNT);
-    var alpha = 1 - powders_beers_law(distance(enter_point, exit_point), absorption * ABSORPTION);
+    let absorption = absorption_sum;
+    let light = light_sum / f32(ABSORPTION_SAMPLE_AMOUNT) / 1.7;
+    var alpha = 1 - powders_beers_law(distance(enter_point, exit_point), absorption * ABSORPTION * 3);
+    // var alpha = absorption;
     // overdrive alpha so edges aren't of the sdf shape
-    alpha -= 0.1;
-    alpha *= 1.2;
-    return vec4<f32>(1.0, 1.0, 1.0, alpha);
+    // alpha -= 0.2;
+    // alpha *= 1.25;
+    // return vec4<f32>(1.0, 1.0, 1.0, alpha);
+    return vec4<f32>(light, light, light, alpha);
 }
 
 // Optional type please respond to my texts :(
@@ -150,14 +174,34 @@ fn sdBox(p: vec3f, b: vec3f) -> f32 {
 // sample this for the cloud - the rest are helpers
 fn my_noise(p: vec3<f32>) -> f32 {
     var out: f32;
-    let pt = p * 2 + globals.time / 3;
+    let pt = p + globals.time / 10;
     // let pt = p;
-    out += worley_noise(pt) * 2;
-    out -= noise3(pt * 5) * 0.5;
+    // out += (worley_noise(p) - 0.5) * 2;
+    // out -= noise3(pt * 5) * 0.5;
+    // out += 0.5;
+
+    out += 0.9 - (distance(p, vec3<f32>(0.0, 1.5, 0.0)));
+    out = clamp(out, 0.0, 1.0);
+    out -= (1 - worley_noise(pt * 3)) * 0.5;
+    out -= noise3(pt * 15) * 0.1;
+
     // swivel = clamp(swivel, 0, 1);
-    // out = 0.5;
+    // out = sin(p.y * 15);
+    out = clamp(out, 0.0, 1.0);
     return out;
 }
+
+fn sum_sample_noise_over_range(start: vec3<f32>, end: vec3<f32>, steps: u32) -> f32 {
+  let step_dir = normalize(end - start);
+  let step_len = distance(start, end) / f32(steps);
+  var sum = 0.0;
+  for (var step = 0u; step < steps; step++) {
+    let curr_pos = start + step_dir * step_len * f32(step);
+    sum += my_noise(curr_pos);
+  }
+  return sum;
+}
+
 
 fn worley_noise(p: vec3<f32>) -> f32 {
     let points = permutation_points(p);
@@ -172,7 +216,7 @@ fn worley_noise(p: vec3<f32>) -> f32 {
 }
 
 
-const WORLEY_WORLD_SIZE = 20;
+// not quite happy about how I named this in here
 fn permutation_points(p: vec3<f32>) -> array<vec3<f32>, 27> {
     var points = array<vec3<f32>, 27>();
     var i = 0;
@@ -186,7 +230,10 @@ fn permutation_points(p: vec3<f32>) -> array<vec3<f32>, 27> {
                     u32(floored_mod(floored.y, f32(WORLEY_WORLD_SIZE))),
                     u32(floored_mod(floored.z, f32(WORLEY_WORLD_SIZE))),
                 );
-                let hash = hashed_pos_f32(p_floored_worley_world);
+                let hash = worley_offsets
+		  [p_floored_worley_world.x]
+		  [p_floored_worley_world.y]
+		  [p_floored_worley_world.z];
                 points[i] = floored + hash;
                 i++;
             }
@@ -236,6 +283,7 @@ fn hashed_pos_f32(p: vec3u) -> vec3<f32> {
     );
     return hashed_pos_f32;
 }
+
 
 // http://www.jcgt.org/published/0009/03/02/
 fn pcg3d(p: vec3u) -> vec3u {

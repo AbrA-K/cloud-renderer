@@ -1,7 +1,11 @@
 use bevy::{
-    color::palettes::css::WHITE, core_pipeline::prepass::DepthPrepass, pbr::NotShadowCaster,
-    prelude::*, render::render_resource::AsBindGroup,
+    color::palettes::css::WHITE,
+    core_pipeline::prepass::DepthPrepass,
+    pbr::NotShadowCaster,
+    prelude::*,
+    render::{render_resource::AsBindGroup, storage::ShaderStorageBuffer},
 };
+use rand::Rng;
 
 fn main() {
     App::new()
@@ -42,6 +46,7 @@ fn spawn_stuff(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cloud_material: ResMut<Assets<CloudMaterial>>,
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     asset_server: Res<AssetServer>,
 ) {
     // camera
@@ -51,10 +56,10 @@ fn spawn_stuff(
         },
         Msaa::Off, // turn it off since it doesn't work on web
         SpinningCam {
-            height: 3.0,
-            distance: 5.0,
+            height: 1.5,
+            distance: 3.0,
             speed: 0.5,
-            sway_amount: 1.0,
+            sway_amount: 0.2,
             look_at: Vec3::new(0.0, 1.5, 0.0),
         },
         DepthPrepass,
@@ -70,7 +75,7 @@ fn spawn_stuff(
     // cloud
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.5))),
-        MeshMaterial3d(cloud_material.add(CloudMaterial::new())),
+        MeshMaterial3d(cloud_material.add(CloudMaterial::new(buffers))),
         Transform::from_xyz(0.0, 1.5, 0.0),
         NotShadowCaster,
     ));
@@ -85,23 +90,26 @@ fn spawn_stuff(
         },
         Transform::default().with_rotation(Quat::from_euler(EulerRot::XYZ, -2.14, 0.5, 0.0)),
     ));
-    // commands.spawn((
-    //     Mesh3d(meshes.add(Cylinder::new(0.2, 5.0))),
-    //     MeshMaterial3d(materials.add(Color::WHITE)),
-    //     Transform::from_xyz(0.4, 0.2, 0.4),
-    // ));
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(1.0))),
+        MeshMaterial3d(materials.add(Color::WHITE)),
+        Transform::from_xyz(4.0, 4.0, 4.0),
+    ));
 }
 
 #[derive(Clone, Asset, AsBindGroup, TypePath, Debug)]
 struct CloudMaterial {
     #[uniform(100)]
     color: Vec3,
+    #[storage(0, read_only)]
+    offsets: Handle<ShaderStorageBuffer>,
 }
 
 impl CloudMaterial {
-    fn new() -> Self {
+    fn new(mut buffers: ResMut<Assets<ShaderStorageBuffer>>) -> Self {
         Self {
             color: Vec3::new(0.0, 1.0, 1.0),
+	    offsets: buffers.add(get_worley_world()),
         }
     }
 }
@@ -113,4 +121,20 @@ impl Material for CloudMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }
+}
+
+const WORLEY_WORLD_SIZE: usize = 10;
+type WORLEY_OFFSET_ARRAY = [[[f32; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE];
+fn get_worley_world() -> WORLEY_OFFSET_ARRAY {
+    use rand;
+    let mut rng = rand::rng();
+    let mut world = [[[0.0; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE];
+    for slice in world.iter_mut() {
+        for line in slice.iter_mut() {
+            for cell in line.iter_mut() {
+                *cell = rng.random_range(0.0..1.0);
+            }
+        }
+    }
+    return world;
 }
