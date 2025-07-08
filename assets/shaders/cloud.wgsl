@@ -3,32 +3,29 @@
       forward_io::VertexOutput,
       forward_io::FragmentOutput,
       utils::coords_to_viewport_uv,
-      pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
-      pbr_types::pbr_input_new,
-      pbr_types::StandardMaterial,
-      pbr_types::standard_material_new,
-      pbr_functions::alpha_discard,
-      pbr_fragment::pbr_input_from_standard_material,
       mesh_view_bindings::globals,
 }
 
-// THIS NEEDS TO BE SYNCED WITH THE ONE IN main.rs
-const WORLEY_WORLD_SIZE: u32 = 10;
 
 const EPSILON: f32 = 2.718281828;
 const PI: f32 = 3.141592654;
-const FAR_CLIP: f32 = 10.0;
-const TERMINATION_DIST: f32 = 0.001;
 const U32_HIGHEST: u32 = 4294967295u;
+
+// THIS NEEDS TO BE SYNCED WITH THE ONE IN main.rs
+const WORLEY_WORLD_SIZE: u32 = 5;
+
+const FAR_CLIP: f32 = 10.0;
+const TERMINATION_DIST: f32 = 0.0005;
 const NOISE_RES: u32 = 10;
 const CLOUD_COLOR: vec3<f32> = vec3<f32>(0.0);
-const ABSORPTION: f32 = 2;
+const ABSORPTION: f32 = 1.0;
+const LIGHT_SAMPLE_AMOUNT = 5u;
+const ABSORPTION_SAMPLE_AMOUNT = 15u;
 
-const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(1.5), 5000.0);
+const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(4));
 struct LightInfo {
  light_type: u32,
  custom_var: vec3<f32>,
- illuminance: f32,
 }
 
 @group(2) @binding(100) var<uniform> color: vec3<f32>;
@@ -37,7 +34,6 @@ struct LightInfo {
 @fragment
 fn fragment(
     mesh: VertexOutput,
-	    // @builtin(sample_index) sample_index: u32,
 ) -> FragmentOutput {
 
     var out: FragmentOutput;
@@ -51,12 +47,11 @@ fn fragment(
     world /= world.w;
     let ray_dir = normalize(world.xyz - cam_pos);
     var curr_pos = cam_pos;
-    var dist_marched = 0.0;
     let enter_pos_march = perform_march(cam_pos, ray_dir);
     if !enter_pos_march.has_hit {
 	return out;
       }
-    // TODO: this should be twice the radius, not magic numbers
+    // TODO: this is twice the radius hardcoded
     let behind_cloud_pos = enter_pos_march.hit + ray_dir * 1.0 * 2.0;
     let exit_pos_march = perform_march(behind_cloud_pos, -ray_dir);
     if !exit_pos_march.has_hit {
@@ -66,50 +61,33 @@ fn fragment(
     return out;
 }
 
-fn beers_law(distance: f32, absorption: f32) -> f32 {
-  return exp(-distance * absorption);
-}
-
-fn powders_beers_law(distance: f32, absorption: f32) -> f32 {
-  let beer = beers_law(distance, absorption);
-  return beer * pow(EPSILON, -distance * absorption * ABSORPTION);
-}
-
-const LIGHT_SAMPLE_AMOUNT = 3u;
-const ABSORPTION_SAMPLE_AMOUNT = 20u;
 fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
     let step_dir = normalize(exit_point - enter_point);
     let step_len = distance(enter_point, exit_point) / f32(ABSORPTION_SAMPLE_AMOUNT);
-    var curr_point = enter_point;
     var absorption_sum = 0.0;
     var light_sum = 0.0;
     for (var i = 0u; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
+      let curr_point = enter_point + step_dir * step_len * f32(i);
       let light_march = perform_march(TEST_LIGHT.custom_var, curr_point - TEST_LIGHT.custom_var);
       if light_march.has_hit {
 	  let cosh = dot(step_dir, curr_point - light_march.hit) / (length(step_dir) * length(curr_point - light_march.hit));
-	  let scater = henry_greenstein(-0.3, cosh) + henry_greenstein(0.3, cosh);
+	  let scater = henry_greenstein(-0.4, cosh) + henry_greenstein(0.4, cosh);
 	  let light_samples = sum_sample_noise_over_range(curr_point, light_march.hit, LIGHT_SAMPLE_AMOUNT);
-	  let light_avg = light_samples ;
+	  let light_avg = light_samples;
 	  let light_sum_save = light_sum;
 	  light_sum += scater;
 	  light_sum += powders_beers_law(distance(light_march.hit, curr_point),
 					 light_avg * ABSORPTION);
 	  let absorption = absorption_sum;
-	  var alpha = 1 - powders_beers_law(step_len * f32(i),
+	  let alpha = 1 - powders_beers_law(step_len * f32(i),
 					    absorption * ABSORPTION);
-	  light_sum = mix(light_sum, (light_sum_save / f32(i+1)) * (f32(i) + 2), alpha);
+	  light_sum = mix(light_sum, light_sum_save, alpha);
 	}
       absorption_sum += my_noise(curr_point) * step_len;
-      curr_point += (step_dir * step_len);
     }
     let absorption = absorption_sum;
     let light = light_sum / f32(ABSORPTION_SAMPLE_AMOUNT) / 1.7;
     var alpha = 1 - powders_beers_law(distance(enter_point, exit_point), absorption * ABSORPTION * 3);
-    // var alpha = absorption;
-    // overdrive alpha so edges aren't of the sdf shape
-    // alpha -= 0.2;
-    // alpha *= 1.25;
-    // return vec4<f32>(1.0, 1.0, 1.0, alpha);
     return vec4<f32>(light, light, light, alpha);
 }
 
@@ -133,6 +111,7 @@ fn perform_march(start_pos: vec3<f32>, dir: vec3<f32>) -> MarchOutput {
   return MarchOutput(false, curr_point);
 }
 
+// ------- sdf stuff -------
 fn sdf_world(ray_position: vec3<f32>) -> f32 {
   // our cloud is at point (0.0, 1.5, 0.0)
   // TODO: pass it from material, don't hardcode
@@ -145,48 +124,47 @@ fn translate_ray(r: vec3<f32>, world_position: vec3<f32>) -> vec3<f32> {
     var out = r;
     // translation
     out -= world_position;
-
-    // TODO: rotation
-    // TODO: scale
     return out;
 }
 
-//  ,---.  ,------.  ,------.    ,------.                        ,--.  ,--.
-// '   .-' |  .-.  \ |  .---'    |  .---',--.,--.,--,--,  ,---.,-'  '-.`--' ,---. ,--,--,  ,---.
-// `.  `-. |  |  \  :|  `--,     |  `--, |  ||  ||      \| .--''-.  .-',--.| .-. ||      \(  .-'
-// .-'    ||  '--'  /|  |`       |  |`   '  ''  '|  ||  |\ `--.  |  |  |  |' '-' '|  ||  |.-'  `)
-// `-----' `-------' `--'        `--'     `----' `--''--' `---'  `--'  `--' `---' `--''--'`----'
 fn sdf_cloud(p: vec3<f32>, rad: f32) -> f32 {
-    let circle = length(p) - rad;
-    let cube = sdBox(p, vec3<f32>(0.8));
+  let circle = length(p) - rad; // just a circle
 
-
-    return circle;
+  return circle;
 }
 
-fn sdBox(p: vec3f, b: vec3f) -> f32 {
-  let q = abs(p) - b;
-  return length(max(q, vec3f(0.))) + min(max(q.x, max(q.y, q.z)), 0.);
+// ------- cloud math -------
+fn beers_law(distance: f32, absorption: f32) -> f32 {
+  return exp(-distance * absorption);
+}
+
+fn powders_beers_law(distance: f32, absorption: f32) -> f32 {
+  let beer = beers_law(distance, absorption);
+  return beer * pow(EPSILON, -distance * absorption * ABSORPTION * 2);
+}
+
+fn henry_greenstein(g: f32, costh: f32) -> f32 {
+  return (1.0 / (4.0 * PI)) *
+    ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
 }
 
 // ------- noise -------
-
-// sample this for the cloud - the rest are helpers
+// the big noise function I use
 fn my_noise(p: vec3<f32>) -> f32 {
-    var out: f32;
-    let pt = p + globals.time / 10;
-    // let pt = p;
-    // out += (worley_noise(p) - 0.5) * 2;
-    // out -= noise3(pt * 5) * 0.5;
-    // out += 0.5;
+    let pt = p + globals.time / 3;
+    var out1: f32;
+    out1 += (worley_noise(pt));
+    out1 -= 0.8 - (worley_noise(pt * 2));
+    out1 -= noise3(pt * 10) * 0.2;
 
-    out += 0.9 - (distance(p, vec3<f32>(0.0, 1.5, 0.0)));
-    out = clamp(out, 0.0, 1.0);
-    out -= (1 - worley_noise(pt * 3)) * 0.5;
-    out -= noise3(pt * 15) * 0.1;
 
-    // swivel = clamp(swivel, 0, 1);
-    // out = sin(p.y * 15);
+    var out2: f32;
+    out2 += 0.9 - (distance(p, vec3<f32>(0.0, 1.5, 0.0)));
+    out2 = clamp(out2, 0.0, 1.0);
+    out2 -= (1.0 - worley_noise(pt * 3)) * 0.3;
+    out2 -= noise3(pt * 15) * 0.05;
+
+    var out = mix(out1, out2, sin(globals.time) * 0.5 + 0.5);
     out = clamp(out, 0.0, 1.0);
     return out;
 }
@@ -292,9 +270,4 @@ fn pcg3d(p: vec3u) -> vec3u {
     v ^= v >> vec3u(16u);
     v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
     return v;
-}
-
-fn henry_greenstein(g: f32, costh: f32) -> f32 {
-  return (1.0 / (4.0 * PI)) *
-    ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
 }
