@@ -6,13 +6,13 @@
       mesh_view_bindings::globals,
 }
 
+#import "shaders/worley_offsets.wgsl"::WORLEY_OFFSETS;
+#import "shaders/worley_offsets.wgsl"::WORLEY_WORLD_SIZE;
 
 const EPSILON: f32 = 2.718281828;
 const PI: f32 = 3.141592654;
 const U32_HIGHEST: u32 = 4294967295u;
 
-// THIS NEEDS TO BE SYNCED WITH THE ONE IN main.rs
-const WORLEY_WORLD_SIZE: u32 = 5;
 
 const FAR_CLIP: f32 = 10.0;
 const TERMINATION_DIST: f32 = 0.0005;
@@ -27,9 +27,6 @@ struct LightInfo {
  light_type: u32,
  custom_var: vec3<f32>,
 }
-
-@group(2) @binding(100) var<uniform> color: vec3<f32>;
-@group(2) @binding(0) var<storage, read> worley_offsets: array<array<array<f32, WORLEY_WORLD_SIZE>, WORLEY_WORLD_SIZE>, WORLEY_WORLD_SIZE>;
 
 @fragment
 fn fragment(
@@ -208,7 +205,7 @@ fn permutation_points(p: vec3<f32>) -> array<vec3<f32>, 27> {
                     u32(floored_mod(floored.y, f32(WORLEY_WORLD_SIZE))),
                     u32(floored_mod(floored.z, f32(WORLEY_WORLD_SIZE))),
                 );
-                let hash = worley_offsets
+                let hash = WORLEY_OFFSETS
 		  [p_floored_worley_world.x]
 		  [p_floored_worley_world.y]
 		  [p_floored_worley_world.z];

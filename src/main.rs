@@ -1,10 +1,8 @@
 use bevy::{
-    core_pipeline::prepass::DepthPrepass,
     pbr::NotShadowCaster,
     prelude::*,
-    render::{render_resource::AsBindGroup, storage::ShaderStorageBuffer},
+    render::render_resource::AsBindGroup,
 };
-use rand::Rng;
 
 fn main() {
     App::new()
@@ -44,7 +42,6 @@ fn spawn_stuff(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut cloud_material: ResMut<Assets<CloudMaterial>>,
-    buffers: ResMut<Assets<ShaderStorageBuffer>>,
 ) {
     // camera
     commands.spawn((
@@ -60,13 +57,12 @@ fn spawn_stuff(
             sway_amount: 0.2,
             look_at: Vec3::new(0.0, 1.5, 0.0),
         },
-        DepthPrepass,
     ));
 
     // cloud
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.5))),
-        MeshMaterial3d(cloud_material.add(CloudMaterial::new(buffers))),
+        MeshMaterial3d(cloud_material.add(CloudMaterial {})),
         Transform::from_xyz(0.0, 1.5, 0.0),
         NotShadowCaster,
     ));
@@ -74,19 +70,6 @@ fn spawn_stuff(
 
 #[derive(Clone, Asset, AsBindGroup, TypePath, Debug)]
 struct CloudMaterial {
-    #[uniform(100)]
-    color: Vec3,
-    #[storage(0, read_only)]
-    offsets: Handle<ShaderStorageBuffer>,
-}
-
-impl CloudMaterial {
-    fn new(mut buffers: ResMut<Assets<ShaderStorageBuffer>>) -> Self {
-        Self {
-            color: Vec3::new(0.0, 1.0, 1.0),
-            offsets: buffers.add(get_worley_world()),
-        }
-    }
 }
 
 impl Material for CloudMaterial {
@@ -96,19 +79,4 @@ impl Material for CloudMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }
-}
-
-const WORLEY_WORLD_SIZE: usize = 5;
-fn get_worley_world() -> [[[f32; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE] {
-    use rand;
-    let mut rng = rand::rng();
-    let mut world = [[[0.0; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE]; WORLEY_WORLD_SIZE];
-    for slice in world.iter_mut() {
-        for line in slice.iter_mut() {
-            for cell in line.iter_mut() {
-                *cell = rng.random_range(0.0..1.0);
-            }
-        }
-    }
-    return world;
 }
