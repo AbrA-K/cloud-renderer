@@ -201,16 +201,22 @@ fn permutation_points(p: vec3<f32>) -> array<vec3<f32>, 27> {
                     u32(floored_mod(floored.y, f32(WORLEY_WORLD_SIZE))),
                     u32(floored_mod(floored.z, f32(WORLEY_WORLD_SIZE))),
                 );
-                let hash = WORLEY_OFFSETS
-		  [p_floored_worley_world.x]
-		  [p_floored_worley_world.y]
-		  [p_floored_worley_world.z];
+		let hash = index_worley_offsets(p_floored_worley_world.x,
+						p_floored_worley_world.y,
+						p_floored_worley_world.z,);
                 points[i] = floored + hash;
                 i++;
             }
         }
     }
     return points;
+}
+
+fn index_worley_offsets(x: u32, y: u32, z: u32) -> vec3<f32> {
+  let idx = x
+    + y * WORLEY_WORLD_SIZE
+    + z * WORLEY_WORLD_SIZE * WORLEY_WORLD_SIZE;
+  return WORLEY_OFFSETS[idx];
 }
 
 fn floored_mod(x: f32, m: f32) -> f32 {

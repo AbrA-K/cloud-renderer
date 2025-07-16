@@ -1,8 +1,5 @@
-use std::arch::x86_64;
-
 use bevy::{
     asset::RenderAssetUsages,
-    core_pipeline::prepass::DepthPrepass,
     prelude::*,
     render::{
         render_resource::{AsBindGroup, Extent3d, TextureDimension, TextureFormat, TextureUsages},
@@ -51,7 +48,6 @@ fn spin_camera(mut cams: Query<(&mut Transform, &SpinningCam)>, time: Res<Time>)
 fn spawn_stuff(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut cloud_material: ResMut<Assets<CloudMaterial>>,
     mut screen_space_material: ResMut<Assets<ScreenSpaceMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -77,7 +73,7 @@ fn spawn_stuff(
     let first_pass_layer = RenderLayers::layer(1);
 
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.5))),
+        Mesh3d(meshes.add(Sphere::new(1.2))),
         MeshMaterial3d(cloud_material.add(CloudMaterial {})),
         Transform::from_xyz(0.0, 1.5, 0.0),
         first_pass_layer.clone(),
@@ -97,7 +93,7 @@ fn spawn_stuff(
         Msaa::Off,
         SpinningCam {
             height: 1.5,
-            distance: 4.0,
+            distance: 3.0,
             speed: 0.5,
             sway_amount: 0.2,
             look_at: Vec3::new(0.0, 1.5, 0.0),
@@ -112,7 +108,7 @@ fn spawn_stuff(
         Msaa::Off,
         SpinningCam {
             height: 1.5,
-            distance: 4.0,
+            distance: 3.0,
             speed: 0.5,
             sway_amount: 0.2,
             look_at: Vec3::new(0.0, 1.5, 0.0),
@@ -127,7 +123,7 @@ fn spawn_stuff(
     ));
 
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.5))),
+        Mesh3d(meshes.add(Sphere::new(1.2))),
         MeshMaterial3d(screen_space_texture_handle),
         Transform::from_xyz(0.0, 1.5, 0.0),
     ));
@@ -140,6 +136,7 @@ struct CloudMaterial {}
 
 impl Material for CloudMaterial {
     fn fragment_shader() -> bevy::render::render_resource::ShaderRef {
+        // "shaders/cloud.wgsl".into()
         "shaders/cloud.wgsl".into()
     }
     fn alpha_mode(&self) -> AlphaMode {
@@ -178,7 +175,6 @@ fn cloud_image_resize(
     mut images: ResMut<Assets<Image>>,
     cloud_image_handle: ResMut<CloudImageHandle>,
     window: Query<&Window>,
-    buttons: Res<ButtonInput<MouseButton>>,
     mut screen_space_material: ResMut<Assets<ScreenSpaceMaterial>>,
     screen_space_material_handle: ResMut<ScreenSpaceMaterialHandle>,
     mut last_window_size: ResMut<LastWindowSize>,
@@ -196,7 +192,6 @@ fn cloud_image_resize(
     }
 
     if let Some(curr_cloud_image) = images.get_mut(cloud_image_handle.0.id())
-        && let Some(spm) = screen_space_material.get(screen_space_material_handle.0.id())
         && let Ok(window) = window.single()
     {
         // image the cloud is rendered to
