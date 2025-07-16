@@ -1,15 +1,25 @@
+use std::arch::x86_64;
+
 use bevy::{
-    pbr::NotShadowCaster,
+    asset::RenderAssetUsages,
+    core_pipeline::prepass::DepthPrepass,
     prelude::*,
-    render::render_resource::AsBindGroup,
+    render::{
+        render_resource::{AsBindGroup, Extent3d, TextureDimension, TextureFormat, TextureUsages},
+        view::RenderLayers,
+    },
 };
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, MaterialPlugin::<CloudMaterial>::default()))
+        .add_plugins((
+            DefaultPlugins,
+            MaterialPlugin::<CloudMaterial>::default(),
+            MaterialPlugin::<ScreenSpaceMaterial>::default(),
+        ))
         .insert_resource(ClearColor(Color::srgb(0.5, 0.5, 0.9)))
         .add_systems(Startup, spawn_stuff)
-        .add_systems(Update, spin_camera)
+        .add_systems(Update, (spin_camera, cloud_image_resize))
         .run();
 }
 
@@ -41,9 +51,59 @@ fn spin_camera(mut cams: Query<(&mut Transform, &SpinningCam)>, time: Res<Time>)
 fn spawn_stuff(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut cloud_material: ResMut<Assets<CloudMaterial>>,
+    mut screen_space_material: ResMut<Assets<ScreenSpaceMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
-    // camera
+    // image the cloud is rendered to
+    let cloud_image_size = Extent3d {
+        width: 192 * 2,
+        height: 108 * 2,
+        ..default()
+    };
+    let mut cloud_image = Image::new_fill(
+        cloud_image_size.into(),
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Bgra8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    cloud_image.texture_descriptor.usage =
+        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
+    let cloud_image_handle = images.add(cloud_image);
+    commands.insert_resource(CloudImageHandle(cloud_image_handle.clone()));
+
+    let first_pass_layer = RenderLayers::layer(1);
+
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(1.5))),
+        MeshMaterial3d(cloud_material.add(CloudMaterial {})),
+        Transform::from_xyz(0.0, 1.5, 0.0),
+        first_pass_layer.clone(),
+    ));
+
+    commands.spawn((
+        Camera3d {
+            ..Default::default()
+        },
+        Camera {
+            target: cloud_image_handle.clone().into(),
+            clear_color: Color::srgba(0.0, 0.0, 0.0, 0.0).into(),
+            ..Default::default()
+        },
+        first_pass_layer,
+        // turn it off since it doesn't work on web
+        Msaa::Off,
+        SpinningCam {
+            height: 1.5,
+            distance: 4.0,
+            speed: 0.5,
+            sway_amount: 0.2,
+            look_at: Vec3::new(0.0, 1.5, 0.0),
+        },
+    ));
+
     commands.spawn((
         Camera3d {
             ..Default::default()
@@ -52,25 +112,31 @@ fn spawn_stuff(
         Msaa::Off,
         SpinningCam {
             height: 1.5,
-            distance: 3.0,
+            distance: 4.0,
             speed: 0.5,
             sway_amount: 0.2,
             look_at: Vec3::new(0.0, 1.5, 0.0),
         },
     ));
 
-    // cloud
+    let screen_space_texture_handle = screen_space_material.add(ScreenSpaceMaterial {
+        texture: cloud_image_handle,
+    });
+    commands.insert_resource(ScreenSpaceMaterialHandle(
+        screen_space_texture_handle.clone(),
+    ));
+
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(1.5))),
-        MeshMaterial3d(cloud_material.add(CloudMaterial {})),
+        MeshMaterial3d(screen_space_texture_handle),
         Transform::from_xyz(0.0, 1.5, 0.0),
-        NotShadowCaster,
     ));
+
+    commands.insert_resource(LastWindowSize(None));
 }
 
 #[derive(Clone, Asset, AsBindGroup, TypePath, Debug)]
-struct CloudMaterial {
-}
+struct CloudMaterial {}
 
 impl Material for CloudMaterial {
     fn fragment_shader() -> bevy::render::render_resource::ShaderRef {
@@ -78,5 +144,77 @@ impl Material for CloudMaterial {
     }
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
+    }
+}
+
+#[derive(Clone, Asset, AsBindGroup, TypePath, Debug)]
+struct ScreenSpaceMaterial {
+    #[texture(0)]
+    #[sampler(1)]
+    texture: Handle<Image>,
+}
+
+#[derive(Resource)]
+struct ScreenSpaceMaterialHandle(Handle<ScreenSpaceMaterial>);
+
+impl Material for ScreenSpaceMaterial {
+    fn fragment_shader() -> bevy::render::render_resource::ShaderRef {
+        "shaders/screen_space.wgsl".into()
+    }
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Premultiplied
+    }
+}
+
+#[derive(Resource)]
+struct CloudImageHandle(Handle<Image>);
+
+#[derive(Resource)]
+struct LastWindowSize(Option<UVec2>);
+
+/// this is squared i.e., image_height = window_height/(2^CLOUD_DOWNSAMPLE)
+const CLOUD_DOWNSAMPLE: u32 = 2;
+fn cloud_image_resize(
+    mut images: ResMut<Assets<Image>>,
+    cloud_image_handle: ResMut<CloudImageHandle>,
+    window: Query<&Window>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mut screen_space_material: ResMut<Assets<ScreenSpaceMaterial>>,
+    screen_space_material_handle: ResMut<ScreenSpaceMaterialHandle>,
+    mut last_window_size: ResMut<LastWindowSize>,
+) {
+    // return if we can't get a window or the window has the same size
+    if let Ok(window) = window.single() {
+        if let Some(dimension) = last_window_size.0 {
+            if window.physical_size() == dimension {
+                return;
+            }
+        }
+        last_window_size.0 = Some(window.physical_size());
+    } else {
+        return;
+    }
+
+    if let Some(curr_cloud_image) = images.get_mut(cloud_image_handle.0.id())
+        && let Some(spm) = screen_space_material.get(screen_space_material_handle.0.id())
+        && let Ok(window) = window.single()
+    {
+        // image the cloud is rendered to
+        let downsample_factor: u32 = (2u32).pow(CLOUD_DOWNSAMPLE);
+        let cloud_image_size = Extent3d {
+            width: window.physical_width() / downsample_factor,
+            height: window.physical_height() / downsample_factor,
+            ..default()
+        };
+        curr_cloud_image.resize(cloud_image_size);
+
+        // yes, this should happen automatically - it's the same image handle
+        // it doesn't
+        screen_space_material.insert(
+            screen_space_material_handle.0.id(),
+            ScreenSpaceMaterial {
+                texture: cloud_image_handle.0.clone(),
+            },
+        );
     }
 }

@@ -1,10 +1,8 @@
-#import bevy_pbr::{
-      mesh_view_bindings::view,
-      forward_io::VertexOutput,
-      forward_io::FragmentOutput,
-      utils::coords_to_viewport_uv,
-      mesh_view_bindings::globals,
-}
+#import bevy_pbr::mesh_view_bindings::view,
+#import bevy_pbr::forward_io::VertexOutput,
+#import bevy_pbr::forward_io::FragmentOutput,
+#import bevy_pbr::utils::coords_to_viewport_uv,
+#import bevy_pbr::mesh_view_bindings::globals,
 
 #import "shaders/worley_offsets.wgsl"::WORLEY_OFFSETS;
 #import "shaders/worley_offsets.wgsl"::WORLEY_WORLD_SIZE;
@@ -12,7 +10,6 @@
 const EPSILON: f32 = 2.718281828;
 const PI: f32 = 3.141592654;
 const U32_HIGHEST: u32 = 4294967295u;
-
 
 const FAR_CLIP: f32 = 10.0;
 const TERMINATION_DIST: f32 = 0.0005;
@@ -46,14 +43,14 @@ fn fragment(
     var curr_pos = cam_pos;
     let enter_pos_march = perform_march(cam_pos, ray_dir);
     if !enter_pos_march.has_hit {
-	return out;
-      }
+        return out;
+    }
     // TODO: this is twice the radius hardcoded
     let behind_cloud_pos = enter_pos_march.hit + ray_dir * 1.0 * 2.0;
     let exit_pos_march = perform_march(behind_cloud_pos, -ray_dir);
     if !exit_pos_march.has_hit {
-	return out;
-      }
+        return out;
+    }
     out.color = color_cloud(enter_pos_march.hit, exit_pos_march.hit);
     return out;
 }
@@ -64,23 +61,23 @@ fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
     var absorption_sum = 0.0;
     var light_sum = 0.0;
     for (var i = 0u; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
-      let curr_point = enter_point + step_dir * step_len * f32(i);
-      let light_march = perform_march(TEST_LIGHT.custom_var, curr_point - TEST_LIGHT.custom_var);
-      if light_march.has_hit {
-	  let cosh = dot(step_dir, curr_point - light_march.hit) / (length(step_dir) * length(curr_point - light_march.hit));
-	  let scater = henry_greenstein(-0.4, cosh) + henry_greenstein(0.4, cosh);
-	  let light_samples = sum_sample_noise_over_range(curr_point, light_march.hit, LIGHT_SAMPLE_AMOUNT);
-	  let light_avg = light_samples;
-	  let light_sum_save = light_sum;
-	  light_sum += scater;
-	  light_sum += powders_beers_law(distance(light_march.hit, curr_point),
-					 light_avg * ABSORPTION);
-	  let absorption = absorption_sum;
-	  let alpha = 1 - powders_beers_law(step_len * f32(i),
-					    absorption * ABSORPTION);
-	  light_sum = mix(light_sum, light_sum_save, alpha);
-	}
-      absorption_sum += my_noise(curr_point) * step_len;
+        let curr_point = enter_point + step_dir * step_len * f32(i);
+        let light_march = perform_march(TEST_LIGHT.custom_var, curr_point - TEST_LIGHT.custom_var);
+        if light_march.has_hit {
+            let cosh = dot(step_dir, curr_point - light_march.hit) / (length(step_dir) * length(curr_point - light_march.hit));
+            let scater = henry_greenstein(-0.6, cosh) + henry_greenstein(0.4, cosh);
+            let light_samples = sum_sample_noise_over_range(curr_point, light_march.hit, LIGHT_SAMPLE_AMOUNT);
+            let light_avg = light_samples;
+            let light_sum_save = light_sum;
+            light_sum += clamp(scater, 0.0, 1.0);
+            light_sum += powders_beers_law(distance(light_march.hit, curr_point),
+                light_avg * ABSORPTION);
+            let absorption = absorption_sum;
+            let alpha = 1 - powders_beers_law(step_len * f32(i),
+                absorption * ABSORPTION);
+            light_sum = mix(light_sum, light_sum_save, alpha);
+        }
+        absorption_sum += my_noise(curr_point) * step_len;
     }
     let absorption = absorption_sum;
     let light = light_sum / f32(ABSORPTION_SAMPLE_AMOUNT) / 1.7;
@@ -94,27 +91,27 @@ struct MarchOutput {
  hit: vec3<f32>,
 }
 fn perform_march(start_pos: vec3<f32>, dir: vec3<f32>) -> MarchOutput {
-  let ndir = normalize(dir);
-  var marched_dist = 0.0;
-  var curr_point = start_pos;
-  while marched_dist < FAR_CLIP {
-      let dist = sdf_world(curr_point);
-      if dist < TERMINATION_DIST {
-	  return MarchOutput(true, curr_point);
-	}
-      marched_dist += dist;
-      curr_point += ndir * dist;
+    let ndir = normalize(dir);
+    var marched_dist = 0.0;
+    var curr_point = start_pos;
+    while marched_dist < FAR_CLIP {
+        let dist = sdf_world(curr_point);
+        if dist < TERMINATION_DIST {
+            return MarchOutput(true, curr_point);
+        }
+        marched_dist += dist;
+        curr_point += ndir * dist;
     }
-  return MarchOutput(false, curr_point);
+    return MarchOutput(false, curr_point);
 }
 
 // ------- sdf stuff -------
 fn sdf_world(ray_position: vec3<f32>) -> f32 {
   // our cloud is at point (0.0, 1.5, 0.0)
   // TODO: pass it from material, don't hardcode
-  let rp = translate_ray(ray_position, vec3<f32>(0.0, 1.5, 0.0));
+    let rp = translate_ray(ray_position, vec3<f32>(0.0, 1.5, 0.0));
 
-  return sdf_cloud(rp, 1.0);
+    return sdf_cloud(rp, 1.0);
 }
 
 fn translate_ray(r: vec3<f32>, world_position: vec3<f32>) -> vec3<f32> {
@@ -125,24 +122,23 @@ fn translate_ray(r: vec3<f32>, world_position: vec3<f32>) -> vec3<f32> {
 }
 
 fn sdf_cloud(p: vec3<f32>, rad: f32) -> f32 {
-  let circle = length(p) - rad; // just a circle
+    let circle = length(p) - rad; // just a circle
 
-  return circle;
+    return circle;
 }
 
 // ------- cloud math -------
 fn beers_law(distance: f32, absorption: f32) -> f32 {
-  return exp(-distance * absorption);
+    return exp(-distance * absorption);
 }
 
 fn powders_beers_law(distance: f32, absorption: f32) -> f32 {
-  let beer = beers_law(distance, absorption);
-  return beer * pow(EPSILON, -distance * absorption * ABSORPTION * 2);
+    let beer = beers_law(distance, absorption);
+    return beer * pow(EPSILON, -distance * absorption * ABSORPTION * 2);
 }
 
 fn henry_greenstein(g: f32, costh: f32) -> f32 {
-  return (1.0 / (4.0 * PI)) *
-    ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
+    return (1.0 / (4.0 * PI)) * ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
 }
 
 // ------- noise -------
@@ -167,14 +163,14 @@ fn my_noise(p: vec3<f32>) -> f32 {
 }
 
 fn sum_sample_noise_over_range(start: vec3<f32>, end: vec3<f32>, steps: u32) -> f32 {
-  let step_dir = normalize(end - start);
-  let step_len = distance(start, end) / f32(steps);
-  var sum = 0.0;
-  for (var step = 0u; step < steps; step++) {
-    let curr_pos = start + step_dir * step_len * f32(step);
-    sum += my_noise(curr_pos);
-  }
-  return sum;
+    let step_dir = normalize(end - start);
+    let step_len = distance(start, end) / f32(steps);
+    var sum = 0.0;
+    for (var step = 0u; step < steps; step++) {
+        let curr_pos = start + step_dir * step_len * f32(step);
+        sum += my_noise(curr_pos);
+    }
+    return sum;
 }
 
 
@@ -187,7 +183,7 @@ fn worley_noise(p: vec3<f32>) -> f32 {
             closest = dist;
         }
     }
-    return 1-closest;
+    return 1 - closest;
 }
 
 
@@ -200,7 +196,7 @@ fn permutation_points(p: vec3<f32>) -> array<vec3<f32>, 27> {
             for (var z = -1; z <= 1; z++) {
                 let offset = vec3<f32>(f32(x), f32(y), f32(z));
                 let floored = floor(p) + offset;
-                let p_floored_worley_world = vec3<u32> (
+                let p_floored_worley_world = vec3<u32>(
                     u32(floored_mod(floored.x, f32(WORLEY_WORLD_SIZE))),
                     u32(floored_mod(floored.y, f32(WORLEY_WORLD_SIZE))),
                     u32(floored_mod(floored.z, f32(WORLEY_WORLD_SIZE))),
