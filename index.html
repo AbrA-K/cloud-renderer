@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cloud Renderer</title>
+    <link rel="icon" href="/static/assets/favicon.png" type="image/x-icon">
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div id="canvas-parent">
+      <div id="game-description">
+	<h1>Description</h1>
+	<p>
+	  A small cloud renderer. <br>
+	  This is downscaled by 4 (for every 4 by 4 pixels I'm sampling 1 time) so it should™ run good enough even on lower end devices.
+	</p>
+      </div>
+      <div id="replace_by_game">
+	<h1>Game</h1>
+	<p>
+	  <span class="highlight_warning">WARNING:</span><br>
+	  The game binary can be quite large and running it might take a bit of processing power. <br>
+	  I recommend to load the game on a non-metered connection while on a laptop/desktop pc.
+	</p>
+	<button id="load-game-button">load game!</button>
+      </div>
+    </div>
+    <script type="module">
+      let load_game_button = document.getElementById("load-game-button");
+      let replace_by_game_div = document.getElementById("replace_by_game");
+      import init from "./out/cloud-renderer.js";
+      export function load_game() {
+	  load_game_button.disabled = true;
+	  load_game_button.innerHTML = "loading...";
+	  init().then((_) => {
+	      let canvas = document.querySelector("canvas");
+	      canvas.id = "bevy-canvas";
+	      canvas.style ="";
+	      let canvas_parent = document.getElementById("canvas-parent");
+	      canvas_parent.appendChild(canvas);
+	      replace_by_game_div.remove();
+	  });
+      }
+      load_game_button.onclick = load_game;
+    </script>
+  </body>
+</html>

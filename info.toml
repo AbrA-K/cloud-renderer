@@ -1,0 +1,3 @@
+title = "cloud renderer"
+short_description = "render a volumetric cloud"
+path = "cloud_renderer"
