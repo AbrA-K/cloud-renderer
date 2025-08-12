@@ -14,12 +14,13 @@ const U32_HIGHEST: u32 = 4294967295u;
 const FAR_CLIP: f32 = 10.0;
 const TERMINATION_DIST: f32 = 0.0005;
 const NOISE_RES: u32 = 10;
-const CLOUD_COLOR: vec3<f32> = vec3<f32>(0.0);
-const ABSORPTION: f32 = 1.0;
+// const CLOUD_COLOR: vec3<f32> = vec3<f32>(0.8);
+const DARKEST_COLOR: vec3<f32> = vec3<f32>(0.2);
+const ABSORPTION: f32 = 10.0;
 const LIGHT_SAMPLE_AMOUNT = 5u;
-const ABSORPTION_SAMPLE_AMOUNT = 15u;
+const ABSORPTION_SAMPLE_AMOUNT = 25u;
 
-const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(4));
+const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(4.0));
 struct LightInfo {
  light_type: u32,
  custom_var: vec3<f32>,
@@ -58,31 +59,22 @@ fn fragment(
 fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
     let step_dir = normalize(exit_point - enter_point);
     let step_len = distance(enter_point, exit_point) / f32(ABSORPTION_SAMPLE_AMOUNT);
-    var absorption_sum = 0.0;
+    var transmittance = 1.0;
     var light_sum = 0.0;
+    var acc_color = DARKEST_COLOR;
     for (var i = 0u; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
         let curr_point = enter_point + step_dir * step_len * f32(i);
         let light_march = perform_march(TEST_LIGHT.custom_var, curr_point - TEST_LIGHT.custom_var);
+        let extinction = beers_law(step_len, my_noise(curr_point) * ABSORPTION);
         if light_march.has_hit {
-            let cosh = dot(step_dir, curr_point - light_march.hit) / (length(step_dir) * length(curr_point - light_march.hit));
-            let scater = henry_greenstein(-0.6, cosh) + henry_greenstein(0.4, cosh);
-            let light_samples = sum_sample_noise_over_range(curr_point, light_march.hit, LIGHT_SAMPLE_AMOUNT);
-            let light_avg = light_samples;
-            let light_sum_save = light_sum;
-            light_sum += clamp(scater, 0.0, 1.0);
-            light_sum += powders_beers_law(distance(light_march.hit, curr_point),
-                light_avg * ABSORPTION);
-            let absorption = absorption_sum;
-            let alpha = 1 - powders_beers_law(step_len * f32(i),
-                absorption * ABSORPTION);
-            light_sum = mix(light_sum, light_sum_save, alpha);
+            let light_samples = sum_sample_noise_over_range(step_dir, curr_point, light_march.hit, LIGHT_SAMPLE_AMOUNT);
+            light_sum += mix(0.0, light_samples, transmittance);
+            acc_color += transmittance * light_samples * (1 - extinction);
         }
-        absorption_sum += my_noise(curr_point) * step_len;
+        transmittance *= beers_law(step_len, my_noise(curr_point) * ABSORPTION);
     }
-    let absorption = absorption_sum;
-    let light = light_sum / f32(ABSORPTION_SAMPLE_AMOUNT) / 1.7;
-    var alpha = 1 - powders_beers_law(distance(enter_point, exit_point), absorption * ABSORPTION * 3);
-    return vec4<f32>(light, light, light, alpha);
+    let powder = exp(-transmittance * step_len * f32(ABSORPTION_SAMPLE_AMOUNT) * 0.5);
+    return vec4<f32>(acc_color * powder, 1 - transmittance);
 }
 
 // Optional type please respond to my texts :(
@@ -132,11 +124,6 @@ fn beers_law(distance: f32, absorption: f32) -> f32 {
     return exp(-distance * absorption);
 }
 
-fn powders_beers_law(distance: f32, absorption: f32) -> f32 {
-    let beer = beers_law(distance, absorption);
-    return beer * pow(EPSILON, -distance * absorption * ABSORPTION * 2);
-}
-
 fn henry_greenstein(g: f32, costh: f32) -> f32 {
     return (1.0 / (4.0 * PI)) * ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
 }
@@ -144,33 +131,43 @@ fn henry_greenstein(g: f32, costh: f32) -> f32 {
 // ------- noise -------
 // the big noise function I use
 fn my_noise(p: vec3<f32>) -> f32 {
-    let pt = p + globals.time / 3;
+    let pt = p + globals.time / 10;
+    // let pt = p;
     var out1: f32;
-    out1 += (worley_noise(pt));
-    out1 -= 0.8 - (worley_noise(pt * 2));
-    out1 -= noise3(pt * 10) * 0.2;
+    // out1 += (worley_noise(pt));
+    out1 += (noise3(pt));
+    // out1 -= 0.8 - (worley_noise(pt * 2));
+    out1 -= 0.6 - (noise3(pt * 2));
+    out1 -= noise3(pt * 10) * 0.5;
 
 
     var out2: f32;
-    out2 += 0.9 - (distance(p, vec3<f32>(0.0, 1.5, 0.0)));
-    out2 = clamp(out2, 0.0, 1.0);
-    out2 -= (1.0 - worley_noise(pt * 3)) * 0.3;
-    out2 -= noise3(pt * 15) * 0.05;
+    out2 += 0.8 - (distance(p, vec3<f32>(0.0, 1.5, 0.0)));
+    out2 = clamp(out2 * 5, 0.0, 1.0);
+    // out2 -= (1.0 - worley_noise(pt * 3)) * 0.3;
+    out2 -= (1.0 - noise3(pt * 3)) * 0.5;
+    out2 -= noise3(pt * 15) * 0.3;
 
     var out = mix(out1, out2, sin(globals.time) * 0.5 + 0.5);
     out = clamp(out, 0.0, 1.0);
     return out;
 }
 
-fn sum_sample_noise_over_range(start: vec3<f32>, end: vec3<f32>, steps: u32) -> f32 {
-    let step_dir = normalize(end - start);
-    let step_len = distance(start, end) / f32(steps);
-    var sum = 0.0;
-    for (var step = 0u; step < steps; step++) {
-        let curr_pos = start + step_dir * step_len * f32(step);
-        sum += my_noise(curr_pos);
-    }
-    return sum;
+fn sum_sample_noise_over_range(ray_dir: vec3<f32>, start: vec3<f32>, end: vec3<f32>, steps: u32) -> f32 {
+  let scater_amount = 0.3;
+  let cosh = dot(ray_dir, end - start) / (length(ray_dir) * length(end - start));
+  var scater = henry_greenstein(-scater_amount, cosh) + henry_greenstein(scater_amount, cosh);
+  scater = clamp(1 - scater, 0.0, 1.0);
+  let step_dir = normalize(end - start);
+  let step_len = distance(start, end) / f32(steps);
+  var sum = 0.0;
+  var powder_sum: f32;
+  var transmittance = 1.0;
+  for (var step = 0u; step < steps; step++) {
+    let curr_pos = start + step_dir * step_len * f32(step);
+    transmittance *= beers_law(step_len, scater * my_noise(curr_pos) * ABSORPTION);
+  }
+  return transmittance;
 }
 
 

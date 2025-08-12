@@ -1,10 +1,8 @@
 use bevy::{
-    asset::RenderAssetUsages,
-    prelude::*,
-    render::{
+    asset::RenderAssetUsages, color::palettes::css::WHITE, prelude::*, render::{
         render_resource::{AsBindGroup, Extent3d, TextureDimension, TextureFormat, TextureUsages},
         view::RenderLayers,
-    },
+    }
 };
 
 fn main() {
@@ -50,8 +48,15 @@ fn spawn_stuff(
     mut meshes: ResMut<Assets<Mesh>>,
     mut cloud_material: ResMut<Assets<CloudMaterial>>,
     mut screen_space_material: ResMut<Assets<ScreenSpaceMaterial>>,
+    mut std_material: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
+    commands.spawn((
+        Transform::from_translation(Vec3::splat(4.0)),
+        Mesh3d(meshes.add(Sphere::new(0.2))),
+        MeshMaterial3d(std_material.add(StandardMaterial::from_color(WHITE))),
+    ));
+
     // image the cloud is rendered to
     let cloud_image_size = Extent3d {
         width: 192 * 2,
