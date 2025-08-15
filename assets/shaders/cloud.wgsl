@@ -11,7 +11,7 @@ const EPSILON: f32 = 2.718281828;
 const PI: f32 = 3.141592654;
 const U32_HIGHEST: u32 = 4294967295u;
 
-const FAR_CLIP: f32 = 10.0;
+const FAR_CLIP: f32 = 15.0;
 const TERMINATION_DIST: f32 = 0.0005;
 const NOISE_RES: u32 = 10;
 // const CLOUD_COLOR: vec3<f32> = vec3<f32>(0.8);
@@ -20,7 +20,7 @@ const ABSORPTION: f32 = 10.0;
 const LIGHT_SAMPLE_AMOUNT = 5u;
 const ABSORPTION_SAMPLE_AMOUNT = 25u;
 
-const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(4.0));
+const TEST_LIGHT: LightInfo = LightInfo(1, vec3<f32>(5.0));
 struct LightInfo {
  light_type: u32,
  custom_var: vec3<f32>,
@@ -59,20 +59,32 @@ fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
   let step_dir = normalize(exit_point - enter_point);
   let step_len = distance(enter_point, exit_point) / f32(ABSORPTION_SAMPLE_AMOUNT);
   var transmittance = 1.0;
-  var light_sum = 0.0;
   var acc_color = DARKEST_COLOR;
   for (var i = 0u; i < ABSORPTION_SAMPLE_AMOUNT; i++) {
     let curr_point = enter_point + step_dir * step_len * f32(i);
     let light_march = perform_march(TEST_LIGHT.custom_var, curr_point - TEST_LIGHT.custom_var);
     let extinction = beers_law(step_len, my_noise(curr_point) * ABSORPTION);
     if light_march.has_hit {
+        let scater_amount = 0.6;
+        let cosh = dot(step_dir, normalize((curr_point + step_dir * step_len) - light_march.hit));
+        // let cosh = -1.5;
+        var scater = max(henry_greenstein(-scater_amount, cosh), henry_greenstein(scater_amount, cosh));
+        scater *= 2 * PI;
+        // scater = max(0.1, scater);
+        // return ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
         let light_samples = sum_sample_noise_over_range(step_dir, curr_point, light_march.hit, LIGHT_SAMPLE_AMOUNT);
-        light_sum += mix(0.0, light_samples, transmittance);
-        acc_color += transmittance * light_samples * (1 - extinction);
+        acc_color += transmittance * light_samples * (1 - extinction) * scater;
+        // acc_color += transmittance * light_samples * (1 - scater);
+        // acc_color += (scater / f32(ABSORPTION_SAMPLE_AMOUNT)) * transmittance;
+        // acc_color += transmittance * (scater / scater) * light_samples / f32(ABSORPTION_SAMPLE_AMOUNT);
+        // acc_color = vec3<f32>(extinction * 0.5);
+        // acc_color += scater * 0.1;
+        // acc_color += scater * 0.2 * (transmittance);
       }
-    transmittance *= beers_law(step_len, my_noise(curr_point) * ABSORPTION);
+    transmittance *= extinction;
   }
-  let powder = exp(-transmittance * step_len * f32(ABSORPTION_SAMPLE_AMOUNT) * 0.5);
+  // let powder = clamp(exp(-transmittance * step_len * f32(ABSORPTION_SAMPLE_AMOUNT) * 0.5), 0.0, 1.0);
+  let powder = 1.0;
   return vec4<f32>(acc_color * powder, 1 - transmittance);
 }
 
@@ -124,7 +136,7 @@ fn beers_law(distance: f32, absorption: f32) -> f32 {
 }
 
 fn henry_greenstein(g: f32, costh: f32) -> f32 {
-  return (1.0 / (4.0 * PI)) * ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5));
+  return ((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * costh, 1.5)) / (4 * PI);
 }
 
 // ------- noise -------
@@ -148,25 +160,20 @@ fn my_noise(p: vec3<f32>) -> f32 {
   out2 -= noise3(pt * 15) * 0.3;
 
   var out = mix(out1, out2, sin(globals.time) * 0.5 + 0.5);
+  out = out2;
   out = clamp(out, 0.0, 1.0);
   return out;
 }
 
 fn sum_sample_noise_over_range(ray_dir: vec3<f32>, start: vec3<f32>, end: vec3<f32>, steps: u32) -> f32 {
-  let scater_amount = 0.3;
-  let cosh = dot(ray_dir, end - start) / (length(ray_dir) * length(end - start));
-  var scater = henry_greenstein(-scater_amount, cosh) + henry_greenstein(scater_amount, cosh);
-  scater = clamp(1 - scater, 0.0, 1.0);
   let step_dir = normalize(end - start);
   let step_len = distance(start, end) / f32(steps);
-  var sum = 0.0;
-  var powder_sum: f32;
   var transmittance = 1.0;
   for (var step = 0u; step < steps; step++) {
     let curr_pos = start + step_dir * step_len * f32(step);
-    transmittance *= beers_law(step_len, scater * my_noise(curr_pos) * ABSORPTION);
+    transmittance *= beers_law(step_len, my_noise(curr_pos) * ABSORPTION);
   }
-  return transmittance;
+  return max(transmittance, 0.1);
 }
 
 

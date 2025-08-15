@@ -1,3 +1,5 @@
+mod worley_world;
+
 use bevy::{
     asset::RenderAssetUsages, color::palettes::css::WHITE, prelude::*, render::{
         render_resource::{AsBindGroup, Extent3d, TextureDimension, TextureFormat, TextureUsages},
