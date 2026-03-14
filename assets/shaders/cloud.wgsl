@@ -65,7 +65,7 @@ fn color_cloud(enter_point: vec3<f32>, exit_point: vec3<f32>) -> vec4<f32> {
     let light_march = perform_march(TEST_LIGHT.custom_var, curr_point - TEST_LIGHT.custom_var);
     let extinction = beers_law(step_len, my_noise(curr_point) * ABSORPTION);
     if light_march.has_hit {
-        let scater_amount = 0.6;
+        let scater_amount = 0.3;
         let cosh = dot(step_dir, normalize((curr_point + step_dir * step_len) - light_march.hit));
         // let cosh = -1.5;
         var scater = max(henry_greenstein(-scater_amount, cosh), henry_greenstein(scater_amount, cosh));
